@@ -1,0 +1,510 @@
+---
+title: "Project 2_Blood Prediction Clustering"
+author: "Zarni Htet"
+date: "1/20/2017"
+output: pdf_document
+---
+Importing needed libraries and package installations
+```{r}
+library(MASS)
+library(e1071)
+require(class)
+require(e1071)
+#install.packages("caret")
+library(caret)
+```
+
+**Data**
+
+This project and the dataset are from drivendata, a data science for social good online competition. The dataset in turn is sourced from the survey collection of the mobile blood donation vehicle of the Blood Transfusion Service Center in Taiwan which goes around to different educational institutions and collects blood and data. The goal of the project is to predict blood donation based on a modification of RFM Model (Recency, Frequency and Monetary). The more accurate our predictions, the better estimates we will have of blood supplies leading to more patients getting the right amount of blood at the right time.
+
+The data set has five features with four predictors of
+-Months since Last Donation
+-Number of Donations
+-Total Volume Donated
+-Months since first donation
+
+The dependent variable is a categorical variable of
+-Made Donation in March 2007.
+
+We first import the data file and do some basic cleaning.
+
+Reading in the data file to the environment
+```{r}
+setwd("/Users/zarnihtet/Desktop/NYUClasses/ClassificationNClustering")
+f <-file("https://archive.ics.uci.edu/ml/machine-learning-databases/blood-transfusion/transfusion.data", open="r" ,encoding="UTF-8")
+blood.data <- read.table(f, sep=",", header=T)
+```
+
+Cleaning the headers to more appropriate ones
+```{r}
+names(blood.data) <- c("rec.mon", "freq.time", "volume","first.mon","donated")
+head(blood.data)
+```
+
+
+Data Exploration
+
+We explore the distribution of the dependent variable as well as the independent variables. With the aim of using SVM and Logistic Regression as two models to fit this data, we would like to avoid outliers or skewed data. The exploration led to the impression that independent variables are skewed and to be on the safe side, we have taken log transformations on those features.
+
+Blood Donation Distribition
+```{r}
+par(mfrow=c(1,1))
+barplot(table(blood.data$donated), main = "Blood Donation \n distribution", xlab = "Donated or Not",col = c(2,3))
+legend("topright", legend = c("No Donation", "Donation"), fill = c("red", "green"), cex = 0.5)
+```
+There are more people who do not donate then who donate.
+
+The prescise ratio is as below
+```{r}
+table(blood.data$donated)[1]/table(blood.data$donated)[2]
+```
+
+Distribution of the Independent Variables
+```{r}
+par(mfrow=c(1,2))
+par(mar = c(5,3,3,3))
+hist(blood.data$rec.mon, main = "Distribution of Months \n since Last Donation", xlab = "Months", cex.main = 0.75)
+hist(blood.data$freq.time, main = "Distribution of Number of \n Blood Donations", xlab = "Count", cex.main = 0.75)
+```
+
+```{r}
+par(mfrow=c(1,2))
+par(mar = c(5,3,3,3))
+hist(blood.data$volume, main = "Distribution of \n Volume of Blood", xlab = "Blood Volume", cex.main = 0.75)
+hist(blood.data$first.mon, main = "Distribution of Month \n since first donation", xlab = "Months", cex.main = 0.75)
+```
+
+Since all four independent variables appear to be right-skewed, we will carry out log transformation to make it less skewed.
+```{r}
+#the +1 is to account for 0 values in log in the first colum of the blood data
+blood.ind.log.1 <- log(blood.data[1] + 1)
+blood.ind.log <- log(blood.data[2:4])
+blood.log <- data.frame(blood.ind.log.1,blood.ind.log, blood.data[5])
+head(blood.log)
+```
+
+After the transformation, we can see below that the outliers have been removed.
+```{r}
+par(mfrow=c(1,2))
+par(mar = c(5,3,3,3))
+hist(blood.log$rec.mon, main = "Distribution of Months \n since Last Donation", xlab = "Months", cex.main = 0.75)
+hist(blood.log$freq.time, main = "Distribution of Number of \n Blood Donations", xlab = "Count", cex.main = 0.75)
+```
+
+```{r}
+par(mfrow=c(1,2))
+par(mar = c(5,3,3,3))
+hist(blood.log$volume, main = "Distribution of Months \n since Last Donation", xlab = "Months", cex.main = 0.75)
+hist(blood.log$first.mon, main = "Distribution of Number of \n Blood Donations", xlab = "Count", cex.main = 0.75)
+```
+
+**Analysis Method 1: SVM Linear Method**
+
+SVM (Support Vector Machine) is a computationally efficient model that is built for prediction. At its linear base state, it creates lines or planes (based on the number of independent features in the model) to separate between two or more groups. When two groups are clearly separable, the line or plane is drawn where the distance to the borders of the two groups from the line or plane is maximum using the points or observations closest to the line or plane. Those points or observations are called Support Vectors.When the two groups are not separable, however, another parameter (the Cost Function) came into play to adjudicate where the separation line/plane should be.
+Higher cost (C) function penalizes misclassification and it will use more observations or support vectors. Therefore, it tends to overfit and has high variance. A lower cost function penalizes misclassifcation less and it will use less observation or support vectors. It tends to underfit and has low variance.
+
+Below is our first attempt at SVM without a cost function. As you can see, it totally misclassifies all the people who donated blood as the two classes are not separable on a linear plane.
+
+```{r}
+set.seed(1234)
+svm.fit.lin0 <- svm(factor(donated)~ rec.mon + freq.time + volume + first.mon , data = blood.log, kernel = 'linear')
+plot(svm.fit.lin0, blood.log, formula = rec.mon ~ freq.time, slice = list(volume = 8, first.mon = 3))
+```
+
+Misclassification calculation/Classification Accuracy
+```{r}
+xtabs(~blood.log$donated+svm.fit.lin0$fitted)
+```
+As mentioned before, xtabs confirmed our suspicion that the model has favored the majority class and has misclassified those who donated blood. Its accuracy rate currently stands at
+```{r}
+accur.svm.lin0 <-(570/780)
+accur.svm.lin0
+```
+73.076 percent. The baseline accuracy can be calculated through the Kappa statistics which accounts for random chance or expected accuracy. Expected accuracy of each category can be calculated by the multiplying the true observation of the category to the classified observation of the category and dividing it by the total observation. We would do it for each category and then, sum it all up as shown below.
+```{r}
+exp.svm.lin0 <- ((570*(570+178)/780) + (178*0)/780)/780
+exp.svm.lin0
+```
+70% is the random or expected accuracy of this classifier. We did 3% percent better than random chance above.
+
+The Kappa statistics which conveys how much we are doing in the beyond random point stands at
+```{r}
+kappa.svm.lin0 <- (accur.svm.lin0 - exp.svm.lin0)/(1-exp.svm.lin0)
+kappa.svm.lin0
+```
+10%. Overall, our initial model is not faring very well. In fact, if our primary goal is to predict people who would donate blood, then, this model does not serve us well.
+
+**Analysis Method 2: SVM Kernel**
+
+As mentioned before, the SVM Linear method did not do a good job of classifying blood donors. It maybe that these groups are not linearly separable and therefore, we need to use a method that can handle higher dimensional classification. SVM has a Kernel "trick" method
+that does exactly that. Most importantly, with this"trick", we only need the Kernel function, which is the inner product of the vectors (our feature sets) to solve for a similar maximization problem from earlier in the linear method, but in higher dimension. This Kernel function can be replaced by existing Kernel functions such as the Gaussian kernel. Below is our implementation of such a method.
+
+```{r}
+set.seed(1234)
+svm.fit.ker0 <- svm(factor(donated)~ rec.mon + freq.time + volume + first.mon , data = blood.log, kernel = 'radial')
+plot(svm.fit.ker0, blood.log, formula = rec.mon ~ freq.time, slice = list(volume = 8, first.mon = 3))
+```
+
+Misclassification/Classification Accuracy Calculation
+```{r}
+xtabs(~blood.log$donated+svm.fit.ker0$fitted)
+```
+Unlike before, with the Kernel trick, we have managed the predict a certain portion of the blood donors correctly. The true positive rate of blood donors stands at
+```{r}
+tru.pos.svm.ker0 <- ((27+55)/(123+55))
+tru.pos.svm.ker0
+```
+46% while the overall accuracy rate is at 
+```{r}
+accur.svm.ker0 <- (543+55)/748
+accur.svm.ker0
+```
+~79% to 80%. Without a doubt, we have done better than before. A more accourate way would be to check the Kappa Statistics.
+
+```{r}
+exp.svm.ker0 <- (((543+27)*(543+123)/780) + ((123+55)*(27+55))/780)/780
+exp.svm.ker0
+```
+64.79% is the random or expected accuracy of this classifier. We did 15% percent better.
+The Kappa statistics which conveys how accurately we are predicting beyond random chance stands at
+```{r}
+kappa.svm.ker0 <- (accur.svm.ker0 - exp.svm.ker0)/(1-exp.svm.ker0)
+kappa.svm.ker0
+```
+46 %. The Kernel trick has drastically improved our classifier. However, we must note that we are training and then, running our predictions on the same data set. This could lead to overfitting when we test with out of sample data. One way to avoid that is to use k-fold cross validation. K-Fold cross validation allows us to divide the data by K fold. For instance, if we are to do 10 fold, we would shuffle and then partition the data into 10 segements. If we have a 1,000 rows, it would be 10 groups of 100 each. Then, we can take the first 9 groups as training data while the remaining group is the test data. Then, we pick the next 9 groups and leave 1 group out until all the groups have been used as test data. That way, we reduce variability and overfitting. We would take the average accuracy rates and other performance measurements from each iteration of fitting and prediction.
+
+Furthermore, with the kernel trick, we can further tune the SVM through another parameter called Gamma, in addition to the Cost function (C). As to be expected, gamma is the kernel parameter that defines the shape of the plane in higher dimension for further classification.
+
+Below we have the built in tuning parameter to get the optimal C and Gamma values using grid search with 10 fold cross validation.
+```{r}
+set.seed(1234)
+tune.radial1 <- tune.svm(factor(donated)~., data = blood.log, kernel = 'radial', cost = c(0.01, 0.1, 1, 10, 100), gamma = c(0.5,1,2,3,4))
+summary(tune.radial1)
+```
+
+With tuning, the results turned out to be the gamma value of 0.5 and the cost value of 1.0 would give us the best performance with the misclassification rate at 0.20048 or accuracy stands at ~0.80. We can then apply these two parameters to our entire data set to see how it fares. We do not have to worry about overfitting anymore as the tuning was cross-validated and we are taking the optimal parameter out of it.
+
+Trying the optimal cost and gamma combination of function
+```{r}
+set.seed(1234)
+svm.fit.ker1 <- svm(factor(donated)~ rec.mon + freq.time + volume + first.mon , data = blood.log, kernel = 'radial', cost = 1, gamma = 0.5)
+plot(svm.fit.ker1, blood.log, formula = rec.mon ~ freq.time, slice = list(volume = 8, first.mon = 3))
+```
+
+xtabs : 
+```{r}
+xtabs(~svm.fit.ker1$fitted+blood.log$donated)
+```
+
+We see improvements in predicting the donors at
+```{r}
+tru.pos.svm.ker1 <- ((33+69)/(109+69))
+tru.pos.svm.ker1
+```
+57% compared to 46% before while the overall accuracy rate is at 
+```{r}
+accur.svm.ker1 <- (537+69)/748
+accur.svm.ker1
+```
+81% which is a slight improvement. Without a doubt, we have done better than before, especially in predicting blood donors which is what we desire. A more accourate way would be to check the Kappa Statistics.
+
+```{r}
+exp.svm.ker1 <- (((537+109)*(537+33)/780) + ((33+69)*(109+69))/780)/780
+exp.svm.ker1
+```
+63.5% is the random or expected accuracy of this classifier. We did 18% percent better than random chance.
+
+The Kappa statistics which conveys how much we are doing in the beyond random classification stands at
+```{r}
+kappa.svm.ker1 <- (accur.svm.ker1 - exp.svm.ker1)/(1-exp.svm.ker1)
+kappa.svm.ker1
+```
+47.9% which is close to 2% improvement from before.
+
+Below, we have quickly run SVM with data scaled instead of log transformed following the same logic as above. The results are slightly better with a different C and Gamma tuned parameter. Its slightly better performance are included in the concluding section. In this case, we would be better served to use scaled data instead of log data for SVM.
+
+Scaling this data for blood.ind.scale
+```{r}
+blood.ind.scale <- scale(blood.data[1:4])
+blood.scale <- data.frame(blood.ind.scale, blood.data[5])
+```
+Using scaled data to find the best Tuned Kernel Results
+
+```{r}
+set.seed(1234)
+svm.fit.lin1 <- svm(factor(donated)~ rec.mon + freq.time + volume + first.mon , data = blood.scale, kernel = 'linear')
+plot(svm.fit.lin1, blood.scale, formula = rec.mon ~ freq.time, slice = list(volume = 8, first.mon = 3))
+```
+
+```{r}
+xtabs(~svm.fit.lin1$fitted+blood.scale$donated)
+```
+
+```{r}
+set.seed(1234)
+tune.radial2 <- tune.svm(factor(donated)~., data = blood.scale, kernel = 'radial', cost = c(0.01, 0.1, 1, 10, 100), gamma = c(0.5,1,2,3,4))
+summary(tune.radial2)
+```
+
+```{r}
+set.seed(1234)
+svm.fit.ker2 <- svm(factor(donated)~ rec.mon + freq.time + volume + first.mon , data = blood.log, kernel = 'radial', cost = 10, gamma = 0.5)
+plot(svm.fit.ker1, blood.log, formula = rec.mon ~ freq.time, slice = list(volume = 8, first.mon = 3))
+```
+
+```{r}
+xtabs(~svm.fit.ker2$fitted+blood.scale$donated)
+```
+Accuracy rate
+```{r}
+accur.scale <-(538+73)/748
+accur.scale
+```
+Positive Rate
+```{r}
+pos.scale <-(32+73)/(105+73)
+pos.scale
+```
+Expectated rate
+```{r}
+exp.scale <- (((538+105)*(538+32)/780) + ((105+73)*(32+73))/780)/780
+exp.scale
+```
+Kappa Ratio
+```{r}
+kappa.scale <- (accur.scale - exp.scale)/(1-exp.scale)
+kappa.scale
+```
+
+**Analysis Method 3: Logistic regression**
+
+In this section, we are using logistic regression as a comparison model to our SVM performance as it is considered to be a method not so sensitive to outliers or distributions of its predictors. It models the probability of a particular class such as
+P(blooddonated = True|X independent variables). The functional form is log(odds) = b0 + b1*X1 + b2 *X2 +... + error where the odds is the ratio of the probability of an blood donation happening to the probability that the it is not happening. The beta weights are estimated using maximum likelihood estimation method.
+
+Henceforth, we will be carrying out logistic regression by first doing data exploration to see if there are any features, that are multicollinear. Perfectly multicollinear features must be removed as they do not add any information to the model and the R code will produce warnings due to making the underlying matrix for calculation not full-rank or linearly independent or non-invertible. Furthermore, even though logistic regression is not that sensitive to outliers, we will explore both unscaled and scaled predictors to see if there are any performance differences.
+
+Last but not least, a custom cross validation function along with two helper functions are written to identify the model with the most accurate predictions. The cost function is built on finding the decision boundary/the probability cut off point that maximizes the classification accuracy of the model. It is paired with the cross validation method where each fold applies that cost function.
+
+Loading the data for Logistic Regression model
+```{r}
+blood.data.logit <-blood.data
+#Column must be factored for logit model fitting to work
+blood.data.logit$donated <-factor(blood.data.logit$donated)
+```
+
+Checking the correlations between the predictive features
+```{r}
+pairs(scale(blood.data.logit[,1:4])) #Volume is perfectly collinear with frequency and recent month
+```
+As we can see above, volume is perfectly collinear with freq.time and recent month features and thus, it will be removed from the predictive feature set.
+
+```{r}
+pairs(scale(blood.data.logit[,c(-3,-5)])) #We can take volume out to see other correlation terms
+```
+
+Custom Functions
+
+This helper function picks a threshold to distinguish between true and false predictions for predicted data.
+
+```{r}
+pred.true <- function(t, data) {
+  #Must in the factor level to catch bug in the confusion matrix
+  #Later on
+  factor(ifelse(data > t, 1,0), levels = c(0,1))
+}
+```
+
+This helper function picks an optimal boundary point along with returning the most accurate value and its associated confusion matrix and kappa value when scored across the true values.
+
+```{r}
+optBoundary <- function (prediction, truth){
+  optimv <- seq(0,1,by = 0.01) #sequence of p-values to pick the optimal decision boundary
+  optimvalue <- 0 #initializing accuracy value
+  boundary <-0 #initializing boundary point
+  conf.mat <- matrix(data =0, nrow =2, ncol = 2) # intitializing confusion matrix
+  truth <-truth #saving the true value argument
+  #browser()
+  truth <- factor(truth, levels = c(0,1)) #making sure to factor it for confusion matrix
+  #browser()
+  for (i in optimv)
+  {
+    #browser()
+    predt <- pred.true(i,prediction) #calling the helper function to factor based on boundary value
+    #browser()
+    cm.results <-confusionMatrix(predt, truth) # using confusion matrix for comparison with true values
+    #browser()
+    if (cm.results$overall[1]>optimvalue){ #this is where use the classification rate as the gold standard
+        #browser()
+        optimvalue <- cm.results$overall[[1]] 
+        #browser()
+        boundary <- i
+        #browser()
+        conf.mat <- cm.results$table
+        kappavalue <- cm.results$overall[[2]]
+    }
+  }
+  #returning the accuracy value and the bound0.ary
+  #browser()
+  return (list(optimvalue,boundary, conf.mat, kappavalue))
+}
+```
+
+This main custom function takes in the number of k-folds we want to carry out along with the data we are training/testing and it returns average optimal accuracy, average kappa score, optimal cut off points and the combined confusion matrix of each fold.
+
+```{r}
+optimCV <- function (nfold, data){
+  #Randomly shuffle the data first
+  #browser()
+  myData <- data[sample(nrow(data)),]
+  
+  #Create nfold size folds
+  #browser()
+  folds <- cut(seq(1,nrow(data)), breaks = nfold, labels = FALSE)
+  
+  #Creates Performance Vector
+  avgbou <- rep(NA, nfold)
+  avgacur <- rep(NA, nfold)
+  avgkappa <- rep(NA, nfold)
+  conf.mat <- matrix(data = 0, nrow = 2, ncol = 2)
+  #Performs nfold cross validation
+  #browser()
+  for (i in 1:nfold){
+    testIndex <- which (folds == i, arr.ind = TRUE)
+    #browser()
+    testData <- myData[testIndex,]
+    #browser()
+    trainData <- myData[-testIndex,]
+    #browser()
+    #Use trainData to build the model
+    logit.model.glmtrain <- glm(donated ~ rec.mon + freq.time +   first.mon, family = binomial(), data = trainData[, -3])
+    #browser()
+    data.pred <- predict.glm(logit.model.glmtrain, newdata = testData[,-3], type = "response")
+    #browser()
+    optimalResults <- optBoundary(data.pred,testData[,5])
+    avgacur[i] <-optimalResults[[1]]
+    avgbou[i]<- optimalResults[[2]]
+    intmatrix <- optimalResults[[3]]
+    avgkappa[i] <-optimalResults[[4]]
+    #browser()
+    conf.mat <- conf.mat + intmatrix
+    #browser()
+  }
+  
+  final.avgacur <- mean(avgacur)
+  final.avgbou <- mean(avgbou)
+  conf.mat
+  final.avgkappa <- mean(avgkappa)
+  #browser()
+  return (list(final.avgacur, final.avgbou,conf.mat, final.avgkappa))
+}
+```
+
+Before we carry out the logit model using our custom function, we can examine the statistical siginifcance of the features using the simple model fitting function as well as whether the relationship between independent variable and the dependent variable makes common sense.
+
+```{r}
+logit.model.glm <- glm(donated ~ rec.mon + freq.time +   first.mon + I(freq.time * first.mon), family = binomial(), data = blood.data.logit[, -3])
+summary(logit.model.glm)
+```
+
+From the summary above, we can conclude that all the features we have put in, including the interaction term are statistically siginificant.
+As the number of months since the last time I donated blood increases, the log likelihood of donating decreases. As the number of times I donate increases, the log likehood of blood donating also increases. However, if the first time I donated was a long time ago, the log likehood of blood donating decreases. Without having the interaction term into play, we can see that the most likely person to donate blood is those who have consistently donated a lot. Further distinctions maybe on those who donate regularly with more than average interlude between each donation. This brings to fold the importance of interaction terms into the model which we will have to consider.
+
+Since our primary focus is in improving the overall accuracy, the donation accuracy and kappa accuracy, let's first get the optimal model using our custom functions.
+```{r}
+set.seed(1234)
+logit.one <- optimCV(10, blood.data.logit)
+logit.one
+```
+
+```{r}
+accur.logit.one <- logit.one[[1]]
+accur.logit.one
+```
+
+The overall accuracy stands at 81.68% which is not very different from the best results we get out of log-transformed tuned SVM. The true positive rate for blood donation does not go up compared to the best results we obtained from SVM as it stands at ~49%.
+
+```{r}
+pos.logit.one <-(23+64)/(114+64)
+pos.logit.one
+```
+The expected accuarcy lies at 64% thus, we are doing approximately 17% better than random chance.
+```{r}
+exp.logit.one <- (((547+23)*(547+114)/780) + ((23+64)*(114+64))/780)/780
+exp.logit.one
+```
+
+The kappa value from the confusion matrix stands at 48% which is higher than the kappa value derived from each fold as we were taking an average value there. Compared to SVM, this value is slightly higher than its logistic transformed test set but slightly lower than the scaled test set.
+
+```{r}
+kappa.logit.one <- (accur.logit.one - exp.logit.one)/(1-exp.logit.one)
+kappa.logit.one
+```
+
+Next we run the same battery of tests with scaled data whose results are below that demonstrate that scaling did not effect the results of logistic regression modeling.
+
+Scaled data for logistic regression
+```{r}
+blood.data.logit.s <-blood.data
+#Column must be factored for logit model fitting to work
+blood.data.logit.s[1:4] <- scale(blood.data.logit.s[1:4])
+blood.data.logit.s$donated <-factor(blood.data.logit.s$donated)
+```
+
+```{r}
+set.seed(1234)
+logit.two <- optimCV(10, blood.data.logit.s)
+logit.two
+```
+
+```{r}
+accur.logit.two <- logit.two[[1]]
+accur.logit.two
+```
+
+```{r}
+pos.logit.two <-(23+64)/(114+64)
+pos.logit.two
+```
+
+```{r}
+exp.logit.two <- (((547+23)*(547+114)/780) + ((23+64)*(114+64))/780)/780
+exp.logit.two
+```
+
+```{r}
+kappa.logit.two <- (accur.logit.two - exp.logit.two)/(1-exp.logit.two)
+kappa.logit.two
+```
+
+**Conclusion**
+
+```{r}
+library(xtable)
+library(knitr)
+m <- matrix(0, ncol =6, nrow = 4)
+m <- data.frame(m)
+colnames(m)<- c("S.Linear", "S.Radial", "S.T.Radial", "S.T.Radial.S", "L.Unscaled", "L.Scaled")
+rownames(m) <-c("Donated Accuracy", "Overall Accuracy", "Expected Accuracy", "Kappa Accuarcy")
+m[1]<- c(0, accur.svm.lin0, exp.svm.lin0, kappa.svm.lin0)
+m[2]<- c(tru.pos.svm.ker0, accur.svm.ker0, exp.svm.ker0, kappa.svm.ker0)
+m[3]<- c(tru.pos.svm.ker1, accur.svm.ker1, exp.svm.ker1, kappa.svm.ker1)
+m[4]<- c(pos.scale, accur.scale, exp.scale, kappa.scale)
+m[5]<- c(pos.logit.one,accur.logit.one, exp.logit.one, kappa.logit.one)
+m[6]<- c(pos.logit.two, accur.logit.two, exp.logit.two, kappa.logit.two)
+kable(m)
+```
+
+From the comparison table above, we can conclude that our best model is the tuned SVM Kernel method where the data is scaled. We are predicting blood donors correctly ~59% of the time with 81% oveall accuracy with a Kappa statistics that stands at 50% accuracy for the data beyond random chance. SVM scaled Kernel is a slight improvement upon SVM logged Kernel and these improvements can be primarily attributed to higher true positive rate as their expected accuracy remains the same from their respective confusion matrix. We do not see any improvement upon Logistic regression between scaled and unscaled data. Though the logistic regression do not outperform SVM scaled Kernel, it does better than SVM logged Kernel in the Kappa Accuracy statistics. However, if we are to focus on having higher accuracy for predicting blood donors then, tuned SVM Kernel for both logged and scaled beats logistic by approximately 10%. 
+
+These models are a good start. More can be done, however, to capture certain sub population group who may be primed to donate soon. For instance, from our quick analysis of logistic regression predictor coeefficients, we can see that the logistic model is looking for candidates who have donated frequently and recently. There may be donors who do not donate frequently but cyclically. Perhaps, with creative feature engineering we may be able to capture those donors as well.
+
+
+
+
+
+
+
+
+
+
