@@ -14,9 +14,13 @@ require(e1071)
 library(caret)
 ```
 
-**Data**
+**Introduction**
 
-This project and the dataset are from drivendata, a data science for social good online competition. The dataset in turn is sourced from the survey collection of the mobile blood donation vehicle of the Blood Transfusion Service Center in Taiwan which goes around to different educational institutions and collects blood and data. The goal of the project is to predict blood donation based on a modification of RFM Model (Recency, Frequency and Monetary). The more accurate our predictions, the better estimates we will have of blood supplies leading to more patients getting the right amount of blood at the right time.
+This project and the dataset are from drivendata, a data science for social good online competition. The dataset in turn is sourced from the survey collection of the mobile blood donation vehicle of the Blood Transfusion Service Center in Taiwan which goes around to different educational institutions and collects blood and data. 
+
+**Goal of the Project**
+
+The goal of the project is to predict blood donation based on a modification of RFM Model (Recency, Frequency and Monetary). The more accurate our predictions, the better estimates we will have of blood supplies leading to more patients getting the right amount of blood at the right time.
 
 The data set has five features with four predictors of
 -Months since Last Donation
